@@ -60,15 +60,15 @@ class Scraper:
 
         # Extract and clean price values
         price = soup.find('span', class_='art-price art-price--offer')
-        price = float(price.get_text(strip=True).replace('€', '').replace(',', '.')) if price else None
+        price = self.extract_price(price) if price else None
 
         # Extract old price
         old_price = soup.find('span', class_='art-oldprice')
-        old_price = float(old_price.get_text(strip=True).replace('€', '').replace(',', '.')) if old_price else None
+        old_price = self.extract_price(old_price) if old_price else None
 
-        # Extract promo price if different from regular price (in cases like the one you mentioned)
-        promo_price_element = soup.find('span', class_='mr-2 art-price art-price--offer')  # Check if the promo price has a different class
-        promo_price = float(promo_price_element.get_text(strip=True).replace('€', '').replace(',', '.')) if promo_price_element else price
+        # Extract promo price
+        promo_price_element = soup.find('span', class_='mr-2 art-price art-price--offer')
+        promo_price = self.extract_price(promo_price_element) if promo_price_element else price
 
         # Extract product URL
         product_url = article_tag.find('a')['href'] if article_tag and article_tag.find('a') else "N/A"
@@ -80,6 +80,22 @@ class Scraper:
 
         return Product(name=name, price=price, old_price=old_price, promo_price=promo_price, product_url=product_url, image_url=image_url, data_id=data_id)
 
+    def extract_price(self, price_element):
+        """
+        Extracts and converts price from a BeautifulSoup element.
+        """
+        if price_element:
+            # Get the text and clean it
+            price_text = price_element.get_text(strip=True).replace('€', '').strip()
+            # Normalize the string to remove thousand separators and replace comma with dot
+            price_text = re.sub(r'\.', '', price_text)  # Remove dots used as thousand separators
+            price_text = price_text.replace(',', '.')  # Replace comma with dot for decimal
+            try:
+                return float(price_text)  # Convert to float
+            except ValueError:
+                print(f"Could not convert price: '{price_text}'")
+                return None
+        return None
 
     def scrape(self):
         """Scrapes the products from all pages and stores them in the products list."""
@@ -98,7 +114,6 @@ class Scraper:
 
     def save_to_mysql(self):
         """Saves the scraped products to the MySQL database."""
-        # Establish a database connection
         conn = mysql.connector.connect(**self.db_config)
         cursor = conn.cursor()
 
@@ -112,19 +127,21 @@ class Scraper:
                             product_url VARCHAR(255),
                             product_id VARCHAR(100)
                         )''')
-        
-        cursor.execute('''TRUNCATE TABLE gjirafamall_products''')
 
+        cursor.execute('''TRUNCATE TABLE gjirafamall_products''')
 
         for product in self.products:
             cursor.execute('''INSERT INTO gjirafamall_products (name, price, promo_price, image_url, product_url, product_id)
                             VALUES (%s, %s, %s, %s, %s, %s)''',
-                        (product.name, product.old_price, product.promo_price, product.image_url, product.product_url, product.data_id))
+                        (product.name, product.price, product.promo_price, product.image_url, product.product_url, product.data_id))
 
+        # Commented out until procedure is confirmed
+        # cursor.callproc('calculate_price_history')
 
         conn.commit()
         cursor.close()
         conn.close()
+
 
 if __name__ == "__main__":
     # Database configuration

@@ -50,10 +50,14 @@ class GjirafaScraper:
             # Extracting product details
             product_id = product_item['data-productid'] if product_item and 'data-productid' in product_item.attrs else 'N/A'
             product_name = product_item['onclick'].split('`')[1] if product_item and 'onclick' in product_item.attrs else 'N/A'
+            
+            # Extract and clean price values
             product_price_tag = product.find('span', class_='price')
-            product_price = product_price_tag.text.strip() if product_price_tag else 'N/A'
+            product_price = self.clean_price(product_price_tag.text.strip()) if product_price_tag else None
+
             old_price_tag = product.find('span', class_='old-price')
-            old_price = old_price_tag.text.strip() if old_price_tag else 'N/A'
+            old_price = self.clean_price(old_price_tag.text.strip()) if old_price_tag else None
+
             product_url_tag = product.find('a')
             product_url = product_url_tag['href'] if product_url_tag else 'N/A'
             image_tag = product.find('img')
@@ -63,6 +67,19 @@ class GjirafaScraper:
             products.append([product_id, product_name, product_price, old_price, image_url, product_url])
 
         return products
+
+    def clean_price(self, price_str):
+        """Clean the price string and convert it to a decimal value."""
+        if price_str:
+            # Remove currency symbols and commas
+            price_str = price_str.replace('€', '').replace(',', '').strip()
+            try:
+                return float(price_str)  # Convert to float (MySQL DECIMAL can accept floats)
+            except ValueError:
+                print(f"Error converting price: {price_str}")  # Log if conversion fails
+                return None
+        return None
+
 
     def save_to_db(self, products, chunk_size=1000):
         """Insert the scraped product data into the MySQL database in chunks."""
