@@ -1,7 +1,6 @@
 import requests
-import json
-import re
 import sqlite3
+from bs4 import BeautifulSoup
 
 class FolejaScraper:
     def __init__(self):
@@ -12,18 +11,27 @@ class FolejaScraper:
         self.db_connection = self.create_db_connection()
 
     def create_db_connection(self):
-        """Create a database connection."""
+        """Create a database connection and the foleja_products table."""
         conn = sqlite3.connect("foleja_products.db")
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS test_products (
-                id TEXT PRIMARY KEY,
+        cursor = conn.cursor()
+
+        # Create the products table if it doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS foleja_products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT,
-                price REAL,
-                currency TEXT,
-                valid_from TEXT,
-                is_valid TEXT
+                price DECIMAL(10, 2),
+                promo_price DECIMAL(10, 2),
+                image_url TEXT,
+                product_url TEXT,
+                product_id TEXT
             )
         ''')
+        
+        # Truncate the foleja_products table
+        cursor.execute('DELETE FROM foleja_products')  # Use DELETE instead of TRUNCATE for SQLite
+
+        conn.commit()  # Commit changes to the database
         return conn
 
     def fetch_page(self, page_number):
@@ -38,70 +46,47 @@ class FolejaScraper:
             print(f"Failed to fetch page. Status code: {response.status_code}")
             return None
 
-    def extract_json_data(self, page_content):
-        """Extract JSON data from the page content."""
-        # Print the entire page content for debugging
-        print("Page Content:\n", page_content)  # Ensure you see the complete page content
+    def extract_product_data(self, page_content):
+        """Extract product data using BeautifulSoup."""
+        soup = BeautifulSoup(page_content, 'html.parser')
 
-        # Use regex to find the dataLayer JSON data
-        match = re.search(r'dataLayer\s*=\s*(\[{.*?}\]|\{{.*?}\})', page_content, re.DOTALL)
-        if match:
-            json_data = match.group(1)
+        product_info = []
+        
+        # Check the entire page content to find where product data is stored
+        print(soup.prettify())  # This will print the entire HTML structure; you can search for product details in the output.
 
-            # Debug: Print the extracted JSON string
-            print(f"Extracted JSON data: {json_data}")
+        # Loop over product containers and extract relevant data
+        for product in soup.find_all('div', class_='product-item'):
+            product_id = product.get('data-id')  # Adjust based on the actual structure
+            product_name = product.find('span', class_='product-name').get_text(strip=True) if product.find('span', class_='product-name') else 'N/A'
+            product_price = product.find('span', class_='product-price').get_text(strip=True).replace('€', '').replace(',', '.') if product.find('span', class_='product-price') else '0.00'
+            promo_price = product.find('span', class_='product-promo-price').get_text(strip=True).replace('€', '').replace(',', '.') if product.find('span', class_='product-promo-price') else '0.00'
+            image_url = product.find('img', class_='product-image')['src'] if product.find('img', class_='product-image') else 'N/A'
+            product_url = product.find('a', class_='product-link')['href'] if product.find('a', class_='product-link') else 'N/A'
 
-            # Try to load the JSON data
-            try:
-                # Make sure the JSON data has double quotes for keys
-                json_data = json_data.replace("'", '"')
-                data = json.loads(json_data)
-                return data
-            except json.JSONDecodeError as e:
-                print(f"JSON decoding error: {e}")
-                return None
-        else:
-            print("No dataLayer JSON found.")
-            return None
+            # Append to product_info list
+            product_info.append((product_name, float(product_price), float(promo_price), image_url, product_url, product_id))
+
+        return product_info
 
 
-    def save_to_db(self, products):
-        """Insert products into the database."""
+    def insert_products(self, products):
+        """Insert extracted product data into the database."""
         cursor = self.db_connection.cursor()
-        for product in products:
-            cursor.execute('''
-                INSERT OR REPLACE INTO test_products (id, name, price, currency, valid_from, is_valid) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                product.get('id'),
-                product.get('name'),
-                product.get('price'),
-                product.get('currency'),  # Ensure currency is included correctly
-                None,  # Set valid_from to None or current date
-                None   # Set is_valid to None for new entries
-            ))
+        cursor.executemany('''
+            INSERT INTO foleja_products (name, price, promo_price, image_url, product_url, product_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', products)
         self.db_connection.commit()
 
-    def scrape(self, page_number):
-        """Main scrape method."""
-        page_content = self.fetch_page(page_number)
-        if page_content:
-            json_data = self.extract_json_data(page_content)
-            if json_data:
-                products = json_data.get('productListing', {}).get('products', [])
-                if products:
-                    self.save_to_db(products)
-                    for product in products:
-                        print(f"Product ID: {product.get('id')}, Name: {product.get('name')}, Price: {product.get('price')}")
-
-    def close_db_connection(self):
-        """Close the database connection."""
-        if self.db_connection:
-            self.db_connection.close()
+    def run(self):
+        """Run the scraper."""
+        for page_number in range(1, 6):  # Adjust the range for the number of pages you want to scrape
+            page_content = self.fetch_page(page_number)
+            if page_content:
+                products = self.extract_product_data(page_content)
+                self.insert_products(products)
 
 if __name__ == "__main__":
-    foleja_scraper = FolejaScraper()
-    try:
-        foleja_scraper.scrape(page_number=3)  # Change the page number as needed
-    finally:
-        foleja_scraper.close_db_connection()
+    scraper = FolejaScraper()
+    scraper.run()

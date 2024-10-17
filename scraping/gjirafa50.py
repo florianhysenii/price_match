@@ -1,10 +1,13 @@
 import requests
-import json
 from bs4 import BeautifulSoup
 import mysql.connector
 
 class GjirafaScraper:
     def __init__(self, base_url, headers, db_config):
+        """
+        Initialize the scraper with the base URL, HTTP headers, and database configuration.
+        Establish a connection to the MySQL database.
+        """
         self.base_url = base_url
         self.headers = headers
         self.total_pages = 0  # Initialize total pages
@@ -26,7 +29,7 @@ class GjirafaScraper:
             return None
 
     def get_json_data(self, page_number=1):
-        """Fetch the JSON content from the search URL."""
+        """Fetch the JSON content from the search URL for a specific page."""
         url = f'{self.base_url}/product/search?pagenumber={page_number}&_=1729075655885'
         response = requests.get(url, headers=self.headers)
         
@@ -36,60 +39,57 @@ class GjirafaScraper:
             return None
 
     def parse_product_data(self, product_html):
-        """Extract product details from HTML content."""
+        """Extract product details from the HTML content and return a list of products."""
         soup = BeautifulSoup(product_html, 'html.parser')
-        product_items = soup.find_all('div', class_='item-box')  # Look for all item boxes
+        product_items = soup.find_all('div', class_='item-box')
         products = []
 
         for product in product_items:
-            # Extracting the product item div
             product_item = product.find('div', class_='product-item')
 
-            # Get product ID from the data-productid attribute
+            # Extracting product details
             product_id = product_item['data-productid'] if product_item and 'data-productid' in product_item.attrs else 'N/A'
-
-            # Extracting product name from the onclick attribute
             product_name = product_item['onclick'].split('`')[1] if product_item and 'onclick' in product_item.attrs else 'N/A'
-
-            # Extracting product price
             product_price_tag = product.find('span', class_='price')
             product_price = product_price_tag.text.strip() if product_price_tag else 'N/A'
-
-            # Extracting old price
             old_price_tag = product.find('span', class_='old-price')
             old_price = old_price_tag.text.strip() if old_price_tag else 'N/A'
-
-            # Extracting discount
-            discount_tag = product.find('div', class_='discount__label')
-            discount_percentage = discount_tag.text.strip() if discount_tag else 'N/A'
-
-            # Extracting product URL
             product_url_tag = product.find('a')
             product_url = product_url_tag['href'] if product_url_tag else 'N/A'
-
-            # Extracting image URL
             image_tag = product.find('img')
             image_url = image_tag['src'] if image_tag else 'N/A'
 
-            # Append product details to the list
-            products.append([product_id, product_name, product_price, old_price, discount_percentage, product_url, image_url])
+            # Append the extracted details to the list of products
+            products.append([product_id, product_name, product_price, old_price, image_url, product_url])
 
         return products
 
     def save_to_db(self, products, chunk_size=1000):
-        """Insert the scraped product data into MySQL database in chunks."""
+        """Insert the scraped product data into the MySQL database in chunks."""
         if not self.db_connection:
             print("No database connection. Cannot save data.")
             return 0  # Return 0 if there's no connection
 
         cursor = self.db_connection.cursor()
 
+        cursor.execute('''CREATE TABLE IF NOT EXISTS gjirafa50_products (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            name VARCHAR(255),
+                            price DECIMAL(10, 2),
+                            promo_price DECIMAL(10, 2),
+                            image_url VARCHAR(255),
+                            product_url VARCHAR(255),
+                            product_id VARCHAR(100)
+                        )''')
+        
+        cursor.execute('''TRUNCATE TABLE gjirafa50_products''')
+
         insert_query = """
-        INSERT INTO products (product_id, product_name, price, old_price, discount, product_url, image_url)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO gjirafa50_products (product_id, name, price, promo_price, image_url, product_url)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
-        product_name = VALUES(product_name), price = VALUES(price), old_price = VALUES(old_price),
-        discount = VALUES(discount), product_url = VALUES(product_url), image_url = VALUES(image_url)
+        name = VALUES(name), price = VALUES(price), promo_price = VALUES(promo_price),
+        image_url = VALUES(image_url), product_url = VALUES(product_url)
         """
 
         count = 0  # Counter for number of rows inserted
@@ -113,12 +113,11 @@ class GjirafaScraper:
         return count  # Return the count of inserted products
 
     def scrape_page(self, page_number=1):
-        """Scrape a specific page for products."""
+        """Scrape a specific page for products and return the parsed products."""
         json_data = self.get_json_data(page_number)
 
         if json_data:
             product_html = json_data.get('html', '')
-            # Get total pages from JSON response
             self.total_pages = json_data.get('totalpages', 0)  # Update total pages
             if product_html:
                 products = self.parse_product_data(product_html)
@@ -126,14 +125,13 @@ class GjirafaScraper:
         return []
 
     def scrape_all_pages(self):
-        """Scrape all pages based on the total number of pages retrieved from the JSON response."""
+        """Scrape all available pages and save the data to the database."""
         all_products = []
         for page in range(1, self.total_pages + 1):  # Loop through all pages
             print(f"Scraping page {page}")
             products = self.scrape_page(page)
             all_products.extend(products)
 
-        # After collecting all products, save them to the database
         if all_products:
             inserted_count = self.save_to_db(all_products)  # Save to DB and get inserted count
             print(f"Inserted {inserted_count} products into the database.")  # Print the number of products inserted
@@ -159,5 +157,5 @@ if __name__ == '__main__':
         scraper.total_pages = initial_data.get('totalpages', 0)  # Update total pages
         print(f"Total pages to scrape: {scraper.total_pages}")  # Print total pages
 
-    # Now scrape all pages and save to database
+    # Scrape all pages and save the data to the database
     scraper.scrape_all_pages()
