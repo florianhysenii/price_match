@@ -10,7 +10,7 @@ class GjirafaScraper:
         """
         self.base_url = base_url
         self.headers = headers
-        self.total_pages = 0  # Initialize total pages
+        self.total_pages = 0 
         self.db_config = db_config
         self.db_connection = self.connect_to_db()
 
@@ -47,24 +47,21 @@ class GjirafaScraper:
         for product in product_items:
             product_item = product.find('div', class_='product-item')
 
-            # Extracting product details
             product_id = product_item['data-productid'] if product_item and 'data-productid' in product_item.attrs else 'N/A'
             product_name = product_item['onclick'].split('`')[1] if product_item and 'onclick' in product_item.attrs else 'N/A'
             
-            # Extract and clean price values
-            product_price_tag = product.find('span', class_='price')
-            product_price = self.clean_price(product_price_tag.text.strip()) if product_price_tag else None
+            promo_price_tag = product.find('span', class_='price')  # This is now promo_price
+            promo_price = self.clean_price(promo_price_tag.text.strip()) if promo_price_tag else None
 
-            old_price_tag = product.find('span', class_='old-price')
-            old_price = self.clean_price(old_price_tag.text.strip()) if old_price_tag else None
+            price_tag = product.find('span', class_='old-price')  # This is now the original price
+            price = self.clean_price(price_tag.text.strip()) if price_tag else None
 
             product_url_tag = product.find('a')
             product_url = product_url_tag['href'] if product_url_tag else 'N/A'
             image_tag = product.find('img')
             image_url = image_tag['src'] if image_tag else 'N/A'
 
-            # Append the extracted details to the list of products
-            products.append([product_id, product_name, product_price, old_price, image_url, product_url])
+            products.append([product_id, product_name, price, promo_price, image_url, product_url])
 
         return products
 
@@ -76,7 +73,7 @@ class GjirafaScraper:
             try:
                 return float(price_str)  # Convert to float (MySQL DECIMAL can accept floats)
             except ValueError:
-                print(f"Error converting price: {price_str}")  # Log if conversion fails
+                print(f"Error converting price: {price_str}")
                 return None
         return None
 
@@ -92,8 +89,8 @@ class GjirafaScraper:
         cursor.execute('''CREATE TABLE IF NOT EXISTS gjirafa50_products (
                             id INT AUTO_INCREMENT PRIMARY KEY,
                             name VARCHAR(255),
-                            price DECIMAL(10, 2),
-                            promo_price DECIMAL(10, 2),
+                            price DECIMAL(10, 2),  -- Now promo price
+                            promo_price DECIMAL(10, 2),  -- Now original price
                             image_url VARCHAR(255),
                             product_url VARCHAR(255),
                             product_id VARCHAR(100)
@@ -109,7 +106,7 @@ class GjirafaScraper:
         image_url = VALUES(image_url), product_url = VALUES(product_url)
         """
 
-        count = 0  # Counter for number of rows inserted
+        count = 0 
 
         for product in products:
             try:
@@ -118,13 +115,14 @@ class GjirafaScraper:
             except mysql.connector.Error as err:
                 print(f"Error inserting product {product[0]}: {err}")
 
-            # Commit after every `chunk_size` rows
             if count % chunk_size == 0:
                 self.db_connection.commit()
 
-        # Commit any remaining rows
         if count % chunk_size != 0:
             self.db_connection.commit()
+
+        cursor.execute('''CALL update_dim_gjirafa50_products_auto();''')
+
 
         print(f"Inserted {count} products into the database.")
         return count  # Return the count of inserted products
@@ -135,7 +133,7 @@ class GjirafaScraper:
 
         if json_data:
             product_html = json_data.get('html', '')
-            self.total_pages = json_data.get('totalpages', 0)  # Update total pages
+            self.total_pages = json_data.get('totalpages', 0) 
             if product_html:
                 products = self.parse_product_data(product_html)
                 return products
@@ -144,17 +142,17 @@ class GjirafaScraper:
     def scrape_all_pages(self):
         """Scrape all available pages and save the data to the database."""
         all_products = []
-        for page in range(1, self.total_pages + 1):  # Loop through all pages
+        for page in range(1, self.total_pages + 1):
             print(f"Scraping page {page}")
             products = self.scrape_page(page)
             all_products.extend(products)
 
         if all_products:
-            inserted_count = self.save_to_db(all_products)  # Save to DB and get inserted count
-            print(f"Inserted {inserted_count} products into the database.")  # Print the number of products inserted
+            inserted_count = self.save_to_db(all_products)  
+            print(f"Inserted {inserted_count} products into the database.")  
 
-# Example usage:
 if __name__ == '__main__':
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36'
     }
@@ -171,8 +169,7 @@ if __name__ == '__main__':
     # Scrape the first page to get the total number of pages
     initial_data = scraper.get_json_data(page_number=1)
     if initial_data:
-        scraper.total_pages = initial_data.get('totalpages', 0)  # Update total pages
-        print(f"Total pages to scrape: {scraper.total_pages}")  # Print total pages
+        scraper.total_pages = initial_data.get('totalpages', 0) 
+        print(f"Total pages to scrape: {scraper.total_pages}") 
 
-    # Scrape all pages and save the data to the database
     scraper.scrape_all_pages()

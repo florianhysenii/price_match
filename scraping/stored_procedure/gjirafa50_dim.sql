@@ -25,3 +25,17 @@ BEGIN
 END$$
 
 DELIMITER ;
+
+
+/*step 1
+
+INSERT INTO dim_gjirafa50_products (product_id, name, price, promo_price, image_url, product_url, valid_from)
+SELECT product_id, name, price, promo_price, image_url, product_url, CURDATE()
+FROM gjirafa50_products;
+
+step 2
+when updating the data then this will track the changes
+
+CALL update_dim_gjirafa50_products_auto();
+note
+this will be called when scraper will finish the work
